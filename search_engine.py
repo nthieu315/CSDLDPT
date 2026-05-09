@@ -1,7 +1,7 @@
 import sqlite3
 import numpy as np
 import json
-from feature_extractor import extract_features
+from feature_extractor import extract_features, N_MFCC
 from scipy.spatial.distance import cosine
 import sys
 import os
@@ -87,23 +87,29 @@ def generate_intermediate_results(input_audio_path, input_features, top_results)
     
     # ========== 3. Feature Vector 47 chiều ==========
     ax3 = axes[1, 0]
-    # Phân màu theo nhóm: MFCC Mean(13) + MFCC Std(13) + Spectral Mean(5) + Spectral Std(5)
-    #                     + Autocorr(5) + Energy Bands(3) + Tempo(1) + Envelope(1) + Silence(1)
-    colors = (['#1976D2'] * 13 + ['#7B1FA2'] * 13 +
-              ['#E64A19'] * 5 + ['#FF7043'] * 5 +
-              ['#AB47BC'] * 5 + ['#26A69A'] * 3 +
-              ['#FFA726'] * 1 + ['#78909C'] * 1 + ['#00897B'] * 1)
+    n_mfcc = N_MFCC
+    colors = (
+        ['#1976D2'] * n_mfcc +   # MFCC Mean
+        ['#7B1FA2'] * n_mfcc +   # MFCC Std
+        ['#5E35B1'] * n_mfcc +   # MFCC Autocorr
+        ['#E64A19'] * 5  +       # Spec Mean
+        ['#FF7043'] * 5  +       # Spec Std
+        ['#AB47BC'] * 5  +       # Autocorr
+        ['#26A69A'] * 3  +       # Energy Bands
+        ['#FFA726'] * 3          # Tempo/Env/Silence
+    )
     x_pos = np.arange(len(input_features))
     ax3.bar(x_pos, input_features, color=colors, width=0.8)
-    ax3.set_title('3. Feature Vector (47 chieu)', fontsize=12, fontweight='bold')
+    ax3.set_title(f'3. Feature Vector ({3*N_MFCC+21} chieu)', fontsize=12, fontweight='bold')
     ax3.set_xlabel('Chi so dac trung')
     ax3.set_ylabel('Gia tri')
     ax3.set_xticks(x_pos[::5])
     ax3.grid(True, alpha=0.3, axis='y')
     from matplotlib.patches import Patch
     legend_elements = [
-        Patch(facecolor='#1976D2', label='MFCC Mean (13)'),
-        Patch(facecolor='#7B1FA2', label='MFCC Std (13)'),
+        Patch(facecolor='#1976D2', label=f'MFCC Mean ({N_MFCC})'),
+        Patch(facecolor='#7B1FA2', label=f'MFCC Std ({N_MFCC})'),
+        Patch(facecolor='#5E35B1', label=f'MFCC Autocorr ({N_MFCC})'),
         Patch(facecolor='#E64A19', label='Spec Mean (5)'),
         Patch(facecolor='#FF7043', label='Spec Std (5)'),
         Patch(facecolor='#AB47BC', label='Autocorr (5)'),
@@ -153,16 +159,18 @@ def search_similar_sounds(input_audio_path, top_k=5):
     input_vector = np.array(input_features, dtype=float)
     
     # In ra vector đặc trưng (kết quả trung gian cho báo cáo)
-    print(f"  -> Vector đặc trưng (47 chiều):")
-    print(f"     MFCC Mean    (13): {[round(x, 4) for x in input_features[:13]]}")
-    print(f"     MFCC Std     (13): {[round(x, 4) for x in input_features[13:26]]}")
-    print(f"     Spec Mean     (5): {[round(x, 4) for x in input_features[26:31]]}")
-    print(f"     Spec Std      (5): {[round(x, 4) for x in input_features[31:36]]}")
-    print(f"     Autocorr      (5): {[round(x, 4) for x in input_features[36:41]]}")
-    print(f"     Energy Bands  (3): Low={input_features[41]:.4f}, Mid={input_features[42]:.4f}, High={input_features[43]:.4f}")
-    print(f"     Tempo            : {input_features[44]:.2f} BPM")
-    print(f"     Envelope Std     : {input_features[45]:.6f}")
-    print(f"     Silence Ratio    : {input_features[46]:.6f}")
+    n = N_MFCC
+    print(f"  -> Vector đặc trưng ({3*n+21} chiều):")
+    print(f"     MFCC Mean     ({n}): {[round(x, 4) for x in input_features[:n]]}")
+    print(f"     MFCC Std      ({n}): {[round(x, 4) for x in input_features[n:2*n]]}")
+    print(f"     MFCC Autocorr ({n}): {[round(x, 4) for x in input_features[2*n:3*n]]}")
+    print(f"     Spec Mean      (5): {[round(x, 4) for x in input_features[3*n:3*n+5]]}")
+    print(f"     Spec Std       (5): {[round(x, 4) for x in input_features[3*n+5:3*n+10]]}")
+    print(f"     Autocorr       (5): {[round(x, 4) for x in input_features[3*n+10:3*n+15]]}")
+    print(f"     Energy Bands   (3): Low={input_features[3*n+15]:.4f}, Mid={input_features[3*n+16]:.4f}, High={input_features[3*n+17]:.4f}")
+    print(f"     Tempo             : {input_features[3*n+18]:.2f} BPM")
+    print(f"     Envelope Std      : {input_features[3*n+19]:.6f}")
+    print(f"     Silence Ratio     : {input_features[3*n+20]:.6f}")
     
     # Bước 2: Đọc CSDL
     print(f"\n[Bước 2] Đọc dữ liệu từ CSDL ({DB_NAME})...")
@@ -181,12 +189,13 @@ def search_similar_sounds(input_audio_path, top_k=5):
     
     w_mfcc = 0.6
     w_spectral = 0.4
+    mfcc_end = 3 * N_MFCC  # 60 chiều MFCC
     
-    db_vectors_scaled[:, :26] *= w_mfcc
-    db_vectors_scaled[:, 26:] *= w_spectral
+    db_vectors_scaled[:, :mfcc_end]  *= w_mfcc
+    db_vectors_scaled[:, mfcc_end:]  *= w_spectral
     
-    input_vector_scaled[:26] *= w_mfcc
-    input_vector_scaled[26:] *= w_spectral
+    input_vector_scaled[:mfcc_end]   *= w_mfcc
+    input_vector_scaled[mfcc_end:]   *= w_spectral
     
     # Bước 4: Tính Cosine Similarity
     print(f"\n[Bước 4] Tính Cosine Similarity với {len(db_data)} files trong CSDL...")

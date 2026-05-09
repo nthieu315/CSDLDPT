@@ -12,14 +12,21 @@ def lag1_autocorrelation(x):
         return 0.0
     return float(np.corrcoef(x[:-1], x[1:])[0, 1])
 
+N_MFCC = 20
+
 def extract_features(file_path):
     """
-    Trích xuất 47 đặc trưng âm thanh với kỹ thuật MASKING 
+    Trích xuất 61 đặc trưng âm thanh với kỹ thuật MASKING 
     để loại bỏ ảnh hưởng của Zero-padding.
+    Vector: MFCC(20×3=60) + Spectral(15) + EnergyBands(3) + Misc(3) = 61 chiều
     """
     try:
         # Tải audio với sr mặc định
         y, sr = librosa.load(file_path, sr=None)
+        
+        # Cắt bỏ silence ở đầu và cuối file (trim)
+        # top_db=30: frame nào thấp hơn max_amplitude - 30dB được coi là silence
+        y, _ = librosa.effects.trim(y, top_db=30)
         
         # Cấu hình Framing & Windowing
         N_FFT = 512
@@ -28,7 +35,7 @@ def extract_features(file_path):
         # 1. Trích xuất các đặc trưng theo từng khung (Frame-level)
         # ------------------------------------------------------
         # mfccs: (n_mfcc, n_frames)
-        mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13, n_fft=N_FFT, hop_length=HOP_LENGTH)
+        mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=N_MFCC, n_fft=N_FFT, hop_length=HOP_LENGTH)
         # rms_f: (1, n_frames)
         rms_f = librosa.feature.rms(y=y, frame_length=N_FFT, hop_length=HOP_LENGTH)
         
@@ -58,9 +65,10 @@ def extract_features(file_path):
         
         # 3. Tính toán thống kê trên các khung ĐÃ LỌC
         # ------------------------------------------------------
-        # Nhóm MFCC (26 chiều)
-        mfccs_mean = np.mean(mfccs_active, axis=1)
-        mfccs_std = np.std(mfccs_active, axis=1)
+        # Nhóm MFCC (20×3 = 60 chiều: mean + std + autocorr)
+        mfccs_mean  = np.mean(mfccs_active, axis=1)
+        mfccs_std   = np.std(mfccs_active, axis=1)
+        mfccs_acorr = np.array([lag1_autocorrelation(mfccs_active[i]) for i in range(N_MFCC)])
         
         # Nhóm Spectral Mean (5 chiều)
         spec_means = [
@@ -100,9 +108,17 @@ def extract_features(file_path):
         # Silence Ratio: Đo trên toàn bộ file (bao gồm cả padding) để phản ánh tính chất file
         silence_ratio = np.sum(np.abs(y) < SILENCE_THRESHOLD) / len(y)
         
-        # Ghép Vector 47 chiều
+        # Ghép Vector 61 chiều
+        # [0:20]  MFCC Mean        (20)
+        # [20:40] MFCC Std         (20)
+        # [40:60] MFCC Autocorr    (20)
+        # [60:65] Spectral Mean    (5)
+        # [65:70] Spectral Std     (5)
+        # [70:75] Spectral Autocorr(5)
+        # [75:78] Energy Bands     (3)
+        # [78:81] Tempo/Env/Silence(3)
         feature_vector = np.concatenate((
-            mfccs_mean, mfccs_std,
+            mfccs_mean, mfccs_std, mfccs_acorr,
             spec_means, spec_stds, spec_acorrs,
             [low_energy, mid_energy, high_energy],
             [tempo, envelope_std, silence_ratio]
