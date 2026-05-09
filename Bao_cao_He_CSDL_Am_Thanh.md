@@ -1,7 +1,7 @@
-# BÁO CÁO ĐỒ ÁN: TÌM KIẾM ÂM THANH ĐỘNG CƠ (CBAR)
+# BÁO CÁO ĐỒ ÁN: TÌM KIẾM ÂM THANH ĐỘNG CƠ (CBAR) - PHIÊN BẢN TỐI ƯU 81 CHIỀU
 
 ## 1. GIỚI THIỆU CHUNG
-Hệ thống truy xuất âm thanh dựa trên nội dung (Content-Based Audio Retrieval - CBAR) thực hiện tìm kiếm các mẫu động cơ tương đồng thông qua phân tích đặc trưng vật lý của tín hiệu.
+Hệ thống truy xuất âm thanh dựa trên nội dung (Content-Based Audio Retrieval - CBAR) thực hiện tìm kiếm các mẫu động cơ tương đồng (ô tô, máy bay, trực thăng) thông qua phân tích các đặc trưng vật lý và thống kê của tín hiệu âm thanh.
 
 | Thành phần | Công nghệ |
 |---|---|
@@ -11,72 +11,69 @@ Hệ thống truy xuất âm thanh dựa trên nội dung (Content-Based Audio R
 
 ---
 
-## 2. QUY TRÌNH TIỀN XỬ LÝ
+## 2. QUY TRÌNH TIỀN XỬ LÝ (PREPROCESSING)
 
-### 2.1. Chuẩn hóa và Zero-padding
-- **Resampling:** $f_s = 16{,}000$ Hz, kênh Mono.
-- **Độ dài cố định:** 5.0 giây.
-- **Vấn đề Zero-padding:** Để đồng bộ hóa dữ liệu phục vụ xử lý hàng loạt, kỹ thuật Zero-padding được áp dụng cho các file ngắn hơn 5s. Tuy nhiên, việc bù thêm các mẫu bằng 0 sẽ làm sai lệch các tham số thống kê (kéo thấp giá trị Mean, làm tăng Std nhân tạo).
+### 2.1. Cắt khoảng lặng (Silence Trimming)
+Hệ thống áp dụng `librosa.effects.trim` với ngưỡng `top_db=30` để loại bỏ các đoạn im lặng không mang thông tin ở đầu và cuối file. Điều này đảm bảo:
+- Vector đặc trưng tập trung hoàn toàn vào đoạn âm thanh thực tế.
+- Tránh sai lệch chỉ số `Silence Ratio` do các đoạn im lặng kéo dài không liên quan.
 
-### 2.2. Kỹ thuật Masking (Giải pháp tối ưu hóa)
-Để loại bỏ ảnh hưởng tiêu cực của Zero-padding, hệ thống áp dụng kỹ thuật **Masking (Mặt nạ năng lượng)** trong quá trình trích xuất đặc trưng:
-- Hệ thống tính toán năng lượng RMS cho từng khung hình ($32$ ms).
-- Các khung có năng lượng thấp hơn ngưỡng $\epsilon$ được xác định là "khung im lặng" hoặc "phần bù zero".
-- Toàn bộ các phép tính thống kê (Mean, Std, Autocorrelation) chỉ được thực hiện trên các khung hình có tín hiệu thực (Active Frames).
-
-$$ \text{Active Frames} = \{ f : RMS(f) > \epsilon \} $$
-
-Giải pháp này đảm bảo vector đặc trưng của một file âm thanh là **bất biến** bất kể nó được lưu trữ dưới độ dài gốc hay được padding thêm im lặng.
+### 2.2. Chuẩn hóa và Masking
+- **Resampling:** Tín hiệu được đưa về cùng tần số lấy mẫu (mặc định của librosa hoặc sr gốc).
+- **Masking (Mặt nạ năng lượng):** 
+    - Hệ thống tính toán năng lượng RMS cho từng khung hình.
+    - Chỉ các khung hình có năng lượng vượt ngưỡng (`active_mask`) mới được đưa vào tính toán thống kê (Mean, Std, Autocorrelation).
+    - Công thức: $$ \text{Active Frames} = \{ f : RMS(f) > \text{threshold} \} $$
+    - Kỹ thuật này giúp loại bỏ ảnh hưởng của Zero-padding và nhiễu nền cực thấp.
 
 ---
 
-## 3. TRÍCH XUẤT ĐẶC TRƯNG (VECTOR 47 CHIỀU)
+## 3. TRÍCH XUẤT ĐẶC TRƯNG (VECTOR 81 CHIỀU)
+Hệ thống sử dụng vector **81 chiều** để mô tả chi tiết âm sắc, phổ và nhịp điệu của động cơ.
 
-### 3.1. Nhóm MFCC (26 chiều)
-- **MFCC Mean (13 chiều):** Đặc trưng âm sắc trung bình (tính trên Active Frames).
-- **MFCC Std (13 chiều):** Độ lệch chuẩn âm sắc (tính trên Active Frames).
+### 3.1. Chi tiết các nhóm đặc trưng
 
-### 3.2. Nhóm Đặc trưng Phổ — Mean (5 chiều)
-Giá trị trung bình của các đặc trưng vật lý tính trên Active Frames:
-- **Năng lượng RMS**, **Zero Crossing Rate**, **Spectral Centroid**, **Spectral Bandwidth**, **Spectral Rolloff**.
+| STT | Nhóm đặc trưng | Số chiều | Ý nghĩa / Vai trò |
+|:---:|---|:---:|---|
+| **1-20** | **MFCC Mean** | 20 | Đặc trưng âm sắc trung bình (hệ số cepstral). |
+| **21-40** | **MFCC Std** | 20 | Độ biến thiên của âm sắc, thể hiện sự ổn định/gầm rú. |
+| **41-60** | **MFCC Autocorr** | 20 | Tính chu kỳ bậc 1 của âm sắc (Lag-1 autocorrelation). |
+| **61-65** | **Spectral Mean** | 5 | Trung bình: Centroid, Bandwidth, Rolloff, ZCR, RMS. |
+| **66-70** | **Spectral Std** | 5 | Độ lệch chuẩn của các thông số phổ trên. |
+| **71-75** | **Spectral Autocorr**| 5 | Tính chu kỳ của các thông số phổ. |
+| **76-78** | **Energy Bands** | 3 | Tỷ lệ năng lượng dải Bass (0-2k), Mid (2-4k), Treble (>4k). |
+| **79** | **Tempo** | 1 | Nhịp điệu chu kỳ nổ (BPM). |
+| **80** | **Envelope Std** | 1 | Biến thiên độ lớn biên độ, phân biệt động cơ có tiếng nổ đanh gọn hay kéo dài. |
+| **81** | **Silence Ratio** | 1 | Tỷ lệ khoảng lặng tự nhiên trong đoạn âm thanh thực. |
 
-### 3.3. Nhóm Đặc trưng Phổ — Std (5 chiều)
-Độ lệch chuẩn của đặc trưng phổ qua các Active Frames, thể hiện mức độ ổn định của động cơ.
+### 3.2. Ý nghĩa vật lý cụ thể
 
-### 3.4. Tự tương quan bậc 1 — Autocorrelation (5 chiều)
-Đo tính chu kỳ và cấu trúc thời gian của tín hiệu động cơ:
-$$r_1 = \frac{\sum_{t=1}^{T-1}(x_t - \bar{x})(x_{t+1} - \bar{x})}{\sum_{t=1}^{T}(x_t - \bar{x})^2}$$
-
-### 3.5. Phân bố năng lượng theo dải tần (3 chiều)
-Tính tỷ lệ năng lượng trên 3 dải: Low (0-2kHz), Mid (2-4kHz), High (4-8kHz).
-
-### 3.6. Các đặc trưng bổ trợ (3 chiều)
-- **Tempo:** Nhịp điệu chu kỳ nổ (BPM).
-- **Envelope Std:** Độ biến thiên đường bao biên độ.
-- **Silence Ratio:** Tỷ lệ khoảng lặng tự nhiên của động cơ.
+- **20 MFCC (Hệ số Cepstral):** Việc tăng lên 20 hệ số (so với 13 mặc định) giúp nắm bắt chi tiết hơn các "vân âm thanh" ở tần số trung-cao, cực kỳ quan trọng để phân biệt tiếng máy bay (vòng quay cao) và ô tô.
+- **Spectral Centroid:** Xác định "độ sáng" của âm thanh. Động cơ nhỏ/RPM cao có Centroid cao hơn động cơ diesel nặng.
+- **Energy Bands:** 
+    - *Low (0-2kHz):* Năng lượng từ chu kỳ piston.
+    - *Mid (2-4kHz):* Tiếng ma sát cơ khí, tiếng van nạp/xả.
+    - *High (>4kHz):* Tiếng rít gió, tiếng van hoặc nhiễu cao tần.
+- **Lag-1 Autocorrelation:** Đo lường sự tương quan giữa các khung hình liên tiếp. Giá trị cao thể hiện âm thanh động cơ đều đặn, ổn định.
 
 ---
 
 ## 4. THUẬT TOÁN TÌM KIẾM (SEARCH ENGINE)
 
 ### 4.1. Chuẩn hóa và Trọng số
-Vector 47 chiều được chuẩn hóa bằng StandardScaler:
-$$z = \frac{x - \mu}{\sigma}$$
-
-Áp dụng trọng số: $w_{mfcc} = 0.6$, $w_{spectral} = 0.4$.
+Vector 81 chiều được chuẩn hóa bằng `StandardScaler` dựa trên toàn bộ dữ liệu trong CSDL để đưa các đặc trưng về cùng thang đo.
+Sau đó, hệ thống áp dụng **Weighted Feature Fusion**:
+- **Trọng số MFCC ($w=0.6$):** Ưu tiên nhận diện âm sắc đặc trưng.
+- **Trọng số Spectral ($w=0.4$):** Cân đối với các đặc tính vật lý và năng lượng.
 
 ### 4.2. Cosine Similarity
+Độ tương đồng được tính bằng công thức Cosine:
 $$S_C(v_q, v_i) = \frac{v_q \cdot v_i}{\|v_q\| \cdot \|v_i\|}$$
+Giá trị trả về nằm trong khoảng $[0, 1]$, càng gần 1 càng tương đồng cao.
 
 ---
 
-## 5. KẾT QUẢ VÀ ĐÁNH GIÁ
-Hệ thống trả về Top-5 kết quả. Việc sử dụng kỹ thuật Masking giúp cải thiện đáng kể độ chính xác khi tìm kiếm các đoạn âm thanh có độ dài khác nhau, loại bỏ hiện tượng sai lệch vị trí trong không gian vector do padding.
-
----
-
-## PHỤ LỤC: CẤU TRÚC MÃ NGUỒN
-- `dataset_builder.py`: Chuẩn hóa 16kHz, Mono, 5s (có padding).
-- `feature_extractor.py`: Trích xuất 47 đặc trưng với **thuật toán Masking**.
-- `database.py`: SQLite + lưu vector JSON.
-- `search_engine.py`: Engine tìm kiếm: StandardScaler + Weighted Fusion + Cosine.
+## 5. PHỤ LỤC: CẤU TRÚC MÃ NGUỒN
+- `feature_extractor.py`: Trích xuất 81 chiều, áp dụng **Trim** và **Masking**.
+- `database.py`: Quản lý SQLite, tự động rebuild DB khi thay đổi thuật toán.
+- `search_engine.py`: Xử lý logic tìm kiếm, chuẩn hóa và xuất kết quả trung gian.
