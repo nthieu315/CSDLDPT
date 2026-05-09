@@ -70,6 +70,12 @@ def main():
                 output_filename = f"{label}_{count:04d}.wav"
                 output_path = os.path.join(OUT_DIR, output_filename)
                 
+                # KIỂM TRA: Nếu file đã tồn tại thì bỏ qua để không phải xử lý lại
+                if os.path.exists(output_path):
+                    print(f"Bỏ qua [{count+1}]: {output_filename} (Đã tồn tại)")
+                    count += 1
+                    continue
+
                 print(f"Đang xử lý [{count+1}]: {file} -> {output_filename}")
                 success = process_audio(input_path, output_path)
                 

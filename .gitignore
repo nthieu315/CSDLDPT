@@ -1,0 +1,17 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Môi trường ảo
+.venv/
+
+# Dữ liệu tự sinh
+dataset_normalized/
+engine_sounds.db
+ket_qua_trung_gian/
+
+# Dữ liệu gốc và backup
+dataset/
+raw_audio/
+backup/
+
