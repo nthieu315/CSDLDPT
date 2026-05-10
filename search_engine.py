@@ -94,13 +94,18 @@ def generate_intermediate_results(input_audio_path, input_features, top_results)
         ['#5E35B1'] * n_mfcc +   # MFCC Autocorr
         ['#E64A19'] * 5  +       # Spec Mean
         ['#FF7043'] * 5  +       # Spec Std
-        ['#AB47BC'] * 5  +       # Autocorr
+        ['#AB47BC'] * 5  +       # Spec Autocorr
         ['#26A69A'] * 3  +       # Energy Bands
-        ['#FFA726'] * 3          # Tempo/Env/Silence
+        ['#FFA726'] * 3  +       # Tempo/Env/Silence
+        ['#00BCD4'] * 1  +       # Spectral Flatness
+        ['#009688'] * 1  +       # Spectral Contrast
+        ['#8BC34A'] * 2  +       # Num Peaks & Valleys
+        ['#FF5722'] * 1  +       # Pct Above Threshold
+        ['#F06292'] * 2          # Attack & Decay Time
     )
     x_pos = np.arange(len(input_features))
     ax3.bar(x_pos, input_features, color=colors, width=0.8)
-    ax3.set_title(f'3. Feature Vector ({3*N_MFCC+21} chieu)', fontsize=12, fontweight='bold')
+    ax3.set_title(f'3. Feature Vector (88 chieu)', fontsize=12, fontweight='bold')
     ax3.set_xlabel('Chi so dac trung')
     ax3.set_ylabel('Gia tri')
     ax3.set_xticks(x_pos[::5])
@@ -112,11 +117,16 @@ def generate_intermediate_results(input_audio_path, input_features, top_results)
         Patch(facecolor='#5E35B1', label=f'MFCC Autocorr ({N_MFCC})'),
         Patch(facecolor='#E64A19', label='Spec Mean (5)'),
         Patch(facecolor='#FF7043', label='Spec Std (5)'),
-        Patch(facecolor='#AB47BC', label='Autocorr (5)'),
+        Patch(facecolor='#AB47BC', label='Spec Autocorr (5)'),
         Patch(facecolor='#26A69A', label='Energy Bands (3)'),
-        Patch(facecolor='#FFA726', label='Tempo/Env/SR (3)'),
+        Patch(facecolor='#FFA726', label='Tempo/Env/Silence (3)'),
+        Patch(facecolor='#00BCD4', label='Spectral Flatness (1)'),
+        Patch(facecolor='#009688', label='Spectral Contrast (1)'),
+        Patch(facecolor='#8BC34A', label='Num Peaks/Valleys (2)'),
+        Patch(facecolor='#FF5722', label='Pct Above Threshold (1)'),
+        Patch(facecolor='#F06292', label='Attack & Decay (2)'),
     ]
-    ax3.legend(handles=legend_elements, loc='upper right', fontsize=7)
+    ax3.legend(handles=legend_elements, loc='upper right', fontsize=6)
     
     # ========== 4. Similarity Scores Top-5 ==========
     ax4 = axes[1, 1]
@@ -151,7 +161,7 @@ def search_similar_sounds(input_audio_path, top_k=5):
     print("=" * 60)
     
     # Bước 1: Trích xuất đặc trưng
-    print("\n[Bước 1] Trích xuất đặc trưng (47 chiều) file đầu vào...")
+    print("\n[Bước 1] Trích xuất đặc trưng (88 chiều) file đầu vào...")
     input_features = extract_features(input_audio_path)
     if input_features is None:
         return
@@ -159,18 +169,39 @@ def search_similar_sounds(input_audio_path, top_k=5):
     input_vector = np.array(input_features, dtype=float)
     
     # In ra vector đặc trưng (kết quả trung gian cho báo cáo)
-    n = N_MFCC
-    print(f"  -> Vector đặc trưng ({3*n+21} chiều):")
-    print(f"     MFCC Mean     ({n}): {[round(x, 4) for x in input_features[:n]]}")
-    print(f"     MFCC Std      ({n}): {[round(x, 4) for x in input_features[n:2*n]]}")
-    print(f"     MFCC Autocorr ({n}): {[round(x, 4) for x in input_features[2*n:3*n]]}")
-    print(f"     Spec Mean      (5): {[round(x, 4) for x in input_features[3*n:3*n+5]]}")
-    print(f"     Spec Std       (5): {[round(x, 4) for x in input_features[3*n+5:3*n+10]]}")
-    print(f"     Autocorr       (5): {[round(x, 4) for x in input_features[3*n+10:3*n+15]]}")
-    print(f"     Energy Bands   (3): Low={input_features[3*n+15]:.4f}, Mid={input_features[3*n+16]:.4f}, High={input_features[3*n+17]:.4f}")
-    print(f"     Tempo             : {input_features[3*n+18]:.2f} BPM")
-    print(f"     Envelope Std      : {input_features[3*n+19]:.6f}")
-    print(f"     Silence Ratio     : {input_features[3*n+20]:.6f}")
+    n = N_MFCC  # = 20
+    print(f"  -> Vector đặc trưng (88 chiều):")
+    print(f"  --- Nhóm 1 | Tần số      [0:3]   ---")
+    print(f"     ZCR Mean/Std/Autocorr : {[round(x,6) for x in input_features[0:3]]}")
+    print(f"  --- Nhóm 2 | Biên độ     [3:6]   ---")
+    print(f"     RMS Mean/Std/Autocorr : {[round(x,6) for x in input_features[3:6]]}")
+    print(f"  --- Nhóm 3 | Thời gian   [6:8]   ---")
+    print(f"     Tempo                 : {input_features[6]:.2f} BPM")
+    print(f"     Silence Ratio         : {input_features[7]:.6f}")
+    print(f"  --- Nhóm 4 | Phổ âm      [8:75]  ---")
+    print(f"     MFCC Mean    ({n}): {[round(x,4) for x in input_features[8:8+n]]}")
+    print(f"     MFCC Std     ({n}): {[round(x,4) for x in input_features[8+n:8+2*n]]}")
+    print(f"     MFCC Autocorr({n}): {[round(x,4) for x in input_features[8+2*n:68]]}")
+    print(f"     Bandwidth M/S/A       : {[round(x,4) for x in input_features[68:71]]}")
+    print(f"     Rolloff   M/S/A       : {[round(x,4) for x in input_features[71:74]]}")
+    print(f"     Spectral Contrast     : {input_features[74]:.4f}")
+    print(f"  --- Nhóm 5 | Hình dạng  [75:77] ---")
+    print(f"     Envelope Std          : {input_features[75]:.6f}")
+    print(f"     Pct Above 0.5         : {input_features[76]:.4f}")
+    print(f"  --- Nhóm 6 | Độ phức tạp [77:79] ---")
+    print(f"     Num Peaks (norm)      : {input_features[77]:.6f}")
+    print(f"     Num Valleys (norm)    : {input_features[78]:.6f}")
+    print(f"  --- Nhóm 7 | Biên độ màu [79:82] ---")
+    print(f"     Low (<2kHz)           : {input_features[79]:.4f}")
+    print(f"     Mid (2-4kHz)          : {input_features[80]:.4f}")
+    print(f"     High (>4kHz)          : {input_features[81]:.4f}")
+    print(f"  --- Nhóm 8 | Độ chói     [82:86] ---")
+    print(f"     Centroid M/S/A        : {[round(x,4) for x in input_features[82:85]]}")
+    print(f"     Spectral Flatness     : {input_features[85]:.6f}")
+    print(f"  --- Nhóm 9 | Độ chạy     [86]    ---")
+    print(f"     Attack Time (s)       : {input_features[86]:.4f}")
+    print(f"  --- Nhóm 10| Độ suy giảm [87]    ---")
+    print(f"     Decay Time (s)        : {input_features[87]:.4f}")
     
     # Bước 2: Đọc CSDL
     print(f"\n[Bước 2] Đọc dữ liệu từ CSDL ({DB_NAME})...")
@@ -179,41 +210,55 @@ def search_similar_sounds(input_audio_path, top_k=5):
         return
     print(f"  -> Đã nạp {len(db_data)} bản ghi từ CSDL.")
         
-    # Bước 3: Chuẩn hóa và áp dụng trọng số
+    # Bước 3: Chuẩn hóa StandardScaler
     db_vectors = np.array([item["features"] for item in db_data])
-    
-    print(f"\n[Bước 3] Chuẩn hóa StandardScaler + Weighted Feature Fusion (MFCC×0.6 / Spectral×0.4)...")
+
+    # ================================================================
+    # TRỌNG SỐ TỪNG NHÓM — Chỉnh tại đây khi cần tinh chỉnh
+    # (Ghi chú: các giá trị này sẽ được chuẩn hóa tự động theo tổng khi tính)
+    # ================================================================
+    GROUPS = [
+        ("Tần số",      slice(0, 3),   0.033),  # Nhóm 1
+        ("Biên độ",     slice(3, 6),   0.033),  # Nhóm 2
+        ("Thời gian",   slice(6, 8),   0.050),  # Nhóm 3
+        ("Phổ âm",      slice(8, 75),  0.400),  # Nhóm 4
+        ("Hình dạng",   slice(75, 77), 0.033),  # Nhóm 5
+        ("Độ phức tạp", slice(77, 79), 0.050),  # Nhóm 6
+        ("Biên độ màu", slice(79, 82), 0.100),  # Nhóm 7
+        ("Độ chói",     slice(82, 86), 0.150),  # Nhóm 8
+        ("Độ chạy",     slice(86, 87), 0.075),  # Nhóm 9
+        ("Độ suy giảm", slice(87, 88), 0.075),  # Nhóm 10
+    ]   # Tổng trọng số = 1.0
+    # ================================================================
+
+    print(f"\n[Bước 3] Chuẩn hóa StandardScaler (chuẩn hóa từng chiều về cùng tháng đo)...")
     scaler = StandardScaler()
     db_vectors_scaled = scaler.fit_transform(db_vectors)
     input_vector_scaled = scaler.transform([input_vector])[0]
-    
-    w_mfcc = 0.6
-    w_spectral = 0.4
-    mfcc_end = 3 * N_MFCC  # 60 chiều MFCC
-    
-    db_vectors_scaled[:, :mfcc_end]  *= w_mfcc
-    db_vectors_scaled[:, mfcc_end:]  *= w_spectral
-    
-    input_vector_scaled[:mfcc_end]   *= w_mfcc
-    input_vector_scaled[mfcc_end:]   *= w_spectral
-    
-    # Bước 4: Tính Cosine Similarity
-    print(f"\n[Bước 4] Tính Cosine Similarity với {len(db_data)} files trong CSDL...")
+
+    # Hàm tính cosine similarity trên một nhóm
+    def group_cosine(a, b):
+        """Cosine similarity giữa 2 vector con, trả về [0,1]."""
+        na, nb = np.linalg.norm(a), np.linalg.norm(b)
+        if na < 1e-10 or nb < 1e-10:
+            return 0.0
+        return float(max(0.0, np.dot(a, b) / (na * nb)))
+
+    # Bước 4: Tính Group-wise Cosine Similarity
+    print(f"\n[Bước 4] Tính Cosine Similarity theo từng nhóm rồi tổng hợp có trọng số...")
+    print(f"   Công thức: Sim_final = Σ(w_i × Sim_Group_i), tổng w = {sum(g[2] for g in GROUPS):.3f}")
     results = []
-    
+
     for i, item in enumerate(db_data):
-        db_vector = db_vectors_scaled[i]
-        try:
-            distance = cosine(input_vector_scaled, db_vector)
-            similarity = 1 - distance
-            similarity = max(0.0, min(1.0, similarity))
-        except:
-            similarity = 0.0
-            
+        db_vec = db_vectors_scaled[i]
+        sim_final = 0.0
+        for _name, slc, w in GROUPS:
+            sim_final += w * group_cosine(input_vector_scaled[slc], db_vec[slc])
+
         results.append({
             "file_path": item["file_path"],
             "label": item["label"],
-            "similarity": similarity
+            "similarity": round(sim_final, 6)
         })
         
     # Bước 5: Xếp hạng và trả kết quả
