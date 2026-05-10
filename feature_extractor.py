@@ -1,5 +1,6 @@
 import librosa
 import numpy as np
+from scipy.signal import find_peaks
 
 # Ngưỡng biên độ để xác định "khoảng lặng" (silence)
 SILENCE_THRESHOLD = 0.02
@@ -16,9 +17,17 @@ N_MFCC = 20
 
 def extract_features(file_path):
     """
-    Trích xuất 61 đặc trưng âm thanh với kỹ thuật MASKING 
-    để loại bỏ ảnh hưởng của Zero-padding.
-    Vector: MFCC(20×3=60) + Spectral(15) + EnergyBands(3) + Misc(3) = 61 chiều
+    Trích xuất 88 đặc trưng âm thanh theo 10 nhóm phân loại:
+    [0:3]   Nhóm 1 - Tần số    : ZCR (Mean, Std, Autocorr)
+    [3:6]   Nhóm 2 - Biên độ   : RMS (Mean, Std, Autocorr)
+    [6:8]   Nhóm 3 - Thời gian : Tempo, Silence Ratio
+    [8:75]  Nhóm 4 - Phổ âm    : MFCC×60 + Bandwidth×3 + Rolloff×3 + Contrast×1 = 67
+    [75:77] Nhóm 5 - Hình dạng : Envelope Std, Pct Above Threshold
+    [77:79] Nhóm 6 - Độ phức tạp: Num Peaks, Num Valleys
+    [79:82] Nhóm 7 - Biên độ màu: Energy Bands Low/Mid/High
+    [82:86] Nhóm 8 - Độ chói   : Centroid×3 + Spectral Flatness×1
+    [86]    Nhóm 9 - Độ chạy   : Attack Time
+    [87]    Nhóm 10- Độ suy giảm: Decay Time
     """
     try:
         # Tải audio với sr mặc định
@@ -65,29 +74,20 @@ def extract_features(file_path):
         
         # 3. Tính toán thống kê trên các khung ĐÃ LỌC
         # ------------------------------------------------------
-        # Nhóm MFCC (20×3 = 60 chiều: mean + std + autocorr)
+        # MFCC (20×3 = 60 chiều)
         mfccs_mean  = np.mean(mfccs_active, axis=1)
         mfccs_std   = np.std(mfccs_active, axis=1)
         mfccs_acorr = np.array([lag1_autocorrelation(mfccs_active[i]) for i in range(N_MFCC)])
-        
-        # Nhóm Spectral Mean (5 chiều)
-        spec_means = [
-            np.mean(centroid_active), np.mean(bandwidth_active),
-            np.mean(rolloff_active), np.mean(zcr_active), np.mean(rms_active)
-        ]
-        
-        # Nhóm Spectral Std (5 chiều)
-        spec_stds = [
-            np.std(centroid_active), np.std(bandwidth_active),
-            np.std(rolloff_active), np.std(zcr_active), np.std(rms_active)
-        ]
-        
-        # Nhóm Autocorrelation (5 chiều)
-        spec_acorrs = [
-            lag1_autocorrelation(centroid_active), lag1_autocorrelation(bandwidth_active),
-            lag1_autocorrelation(rolloff_active), lag1_autocorrelation(zcr_active),
-            lag1_autocorrelation(rms_active)
-        ]
+
+        # Thống kê riêng từng đặc trưng phổ (mean, std, autocorr)
+        def get_stats(arr):
+            return float(np.mean(arr)), float(np.std(arr)), lag1_autocorrelation(arr)
+
+        zcr_mean, zcr_std, zcr_acorr = get_stats(zcr_active)
+        rms_mean, rms_std, rms_acorr = get_stats(rms_active)
+        bw_mean, bw_std, bw_acorr    = get_stats(bandwidth_active)
+        ro_mean, ro_std, ro_acorr    = get_stats(rolloff_active)
+        ct_mean, ct_std, ct_acorr    = get_stats(centroid_active)
         
         # 4. Các đặc trưng khác
         # ------------------------------------------------------
@@ -100,28 +100,88 @@ def extract_features(file_path):
         mid_energy = np.sum(power[(freqs >= 2000) & (freqs < 4000)]) / total_energy
         high_energy = np.sum(power[freqs >= 4000]) / total_energy
         
-        # Tempo và Envelope
+        # Tempo & Envelope Std
         tempo = librosa.beat.beat_track(y=y, sr=sr)[0]
         if hasattr(tempo, '__len__'): tempo = float(tempo[0])
-        envelope_std = float(np.std(rms_active))
+        envelope_std = rms_std  # Đã tính ở trên (= std của rms_active)
         
         # Silence Ratio: Đo trên toàn bộ file (bao gồm cả padding) để phản ánh tính chất file
         silence_ratio = np.sum(np.abs(y) < SILENCE_THRESHOLD) / len(y)
+
+        # -----------------------------------------------------------------------
+        # 5. Các đặc trưng bổ sung (indices 81-87)
+        # -----------------------------------------------------------------------
+
+        # [81] Spectral Flatness: Đo mức độ đồng đều của phổ âm
+        # Giá trị gần 1 → nhiễu trắng; gần 0 → âm có cấu trúc hài âm rõ ràng
+        flatness_f = librosa.feature.spectral_flatness(y=y, n_fft=N_FFT, hop_length=HOP_LENGTH)[0]
+        spectral_flatness_mean = float(np.mean(flatness_f[active_mask]))
+
+        # [82] Spectral Contrast: Độ chênh lệch đỉnh – thung lũng năng lượng phổ
+        # n_bands=3 → giá trị mean trên toàn bộ băng tần
+        contrast_f = librosa.feature.spectral_contrast(
+            y=y, sr=sr, n_fft=N_FFT, hop_length=HOP_LENGTH, n_bands=3
+        )  # shape: (n_bands+1, n_frames) = (4, n_frames)
+        spectral_contrast_mean = float(np.mean(contrast_f[:, active_mask]))
+
+        # [83-84] Num Peaks & Num Valleys: Định lượng độ phức tạp của waveform
+        # Dùng scipy.signal.find_peaks trên tín hiệu thô đã trim
+        peaks, _   = find_peaks(y,  height=SILENCE_THRESHOLD)
+        valleys, _ = find_peaks(-y, height=SILENCE_THRESHOLD)
+        # Chuẩn hoá theo độ dài tín hiệu để không phụ thuộc vào duration
+        num_peaks   = len(peaks)   / len(y)
+        num_valleys = len(valleys) / len(y)
+
+        # [85] Percentage Above Threshold: Phần trăm thời gian biên độ > 0.5
+        AMPLITUDE_THRESHOLD = 0.5
+        pct_above_threshold = float(np.sum(np.abs(y) > AMPLITUDE_THRESHOLD) / len(y))
+
+        # [86-87] Attack Time & Decay Time
+        # Attack: Thời gian từ đầu đến đỉnh biên độ (RMS envelope)
+        # Decay : Thời gian từ đỉnh đến khi RMS giảm xuống còn 1/e (~36.8%) của đỉnh
+        rms_env   = rms_f[0]                            # shape: (n_frames,)
+        peak_idx  = int(np.argmax(rms_env))
+        peak_val  = rms_env[peak_idx]
+        # Attack: số frame tới đỉnh × thời gian mỗi frame
+        attack_time = float(peak_idx * HOP_LENGTH / sr)
+        # Decay: tìm frame sau đỉnh mà RMS giảm xuống dưới peak/e
+        decay_threshold = peak_val / np.e
+        after_peak = rms_env[peak_idx:]
+        decay_frames = np.where(after_peak < decay_threshold)[0]
+        if len(decay_frames) > 0:
+            decay_time = float(decay_frames[0] * HOP_LENGTH / sr)
+        else:
+            decay_time = float((len(rms_env) - peak_idx) * HOP_LENGTH / sr)
         
-        # Ghép Vector 61 chiều
-        # [0:20]  MFCC Mean        (20)
-        # [20:40] MFCC Std         (20)
-        # [40:60] MFCC Autocorr    (20)
-        # [60:65] Spectral Mean    (5)
-        # [65:70] Spectral Std     (5)
-        # [70:75] Spectral Autocorr(5)
-        # [75:78] Energy Bands     (3)
-        # [78:81] Tempo/Env/Silence(3)
+        # Ghép Vector 88 chiều theo 10 nhóm phân loại
+        # [0:3]   Nhóm 1 - Tần số    : ZCR Mean/Std/Autocorr
+        # [3:6]   Nhóm 2 - Biên độ   : RMS Mean/Std/Autocorr
+        # [6:8]   Nhóm 3 - Thời gian : Tempo, Silence Ratio
+        # [8:68]  Nhóm 4a- Phổ âm    : MFCC Mean(20)+Std(20)+Autocorr(20)
+        # [68:71] Nhóm 4b- Phổ âm    : Bandwidth Mean/Std/Autocorr
+        # [71:74] Nhóm 4c- Phổ âm    : Rolloff Mean/Std/Autocorr
+        # [74:75] Nhóm 4d- Phổ âm    : Spectral Contrast Mean
+        # [75:77] Nhóm 5 - Hình dạng : Envelope Std, Pct Above Threshold
+        # [77:79] Nhóm 6 - Độ phức tạp: Num Peaks, Num Valleys
+        # [79:82] Nhóm 7 - Biên độ màu: Energy Low/Mid/High
+        # [82:85] Nhóm 8a- Độ chói   : Centroid Mean/Std/Autocorr
+        # [85:86] Nhóm 8b- Độ chói   : Spectral Flatness
+        # [86]    Nhóm 9 - Độ chạy   : Attack Time
+        # [87]    Nhóm 10- Độ suy giảm: Decay Time
         feature_vector = np.concatenate((
-            mfccs_mean, mfccs_std, mfccs_acorr,
-            spec_means, spec_stds, spec_acorrs,
-            [low_energy, mid_energy, high_energy],
-            [tempo, envelope_std, silence_ratio]
+            [zcr_mean, zcr_std, zcr_acorr],                        # [0:3]   Nhóm 1
+            [rms_mean, rms_std, rms_acorr],                        # [3:6]   Nhóm 2
+            [tempo, silence_ratio],                                # [6:8]   Nhóm 3
+            mfccs_mean, mfccs_std, mfccs_acorr,                   # [8:68]  Nhóm 4a
+            [bw_mean, bw_std, bw_acorr],                           # [68:71] Nhóm 4b
+            [ro_mean, ro_std, ro_acorr],                           # [71:74] Nhóm 4c
+            [spectral_contrast_mean],                              # [74:75] Nhóm 4d
+            [envelope_std, pct_above_threshold],                   # [75:77] Nhóm 5
+            [num_peaks, num_valleys],                              # [77:79] Nhóm 6
+            [low_energy, mid_energy, high_energy],                 # [79:82] Nhóm 7
+            [ct_mean, ct_std, ct_acorr, spectral_flatness_mean],   # [82:86] Nhóm 8
+            [attack_time],                                         # [86]    Nhóm 9
+            [decay_time]                                           # [87]    Nhóm 10
         ))
         
         return [float(x) for x in feature_vector]
