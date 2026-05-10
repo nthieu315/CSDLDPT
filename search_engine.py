@@ -11,16 +11,6 @@ sys.stdout.reconfigure(encoding='utf-8')
 DB_NAME = "engine_sounds.db"
 OUTPUT_DIR = "ket_qua_trung_gian"
 
-# Kiểm tra xem matplotlib có sẵn không (tùy chọn, dùng để vẽ biểu đồ kết quả trung gian)
-try:
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-    import librosa
-    import librosa.display
-    HAS_MATPLOTLIB = True
-except ImportError:
-    HAS_MATPLOTLIB = False
 
 def get_all_features_from_db():
     """Lấy toàn bộ vector đặc trưng từ CSDL."""
@@ -49,107 +39,6 @@ def get_all_features_from_db():
         })
     return dataset
 
-def generate_intermediate_results(input_audio_path, input_features, top_results):
-    """
-    Sinh ra các kết quả trung gian (Yêu cầu 4b):
-    - Waveform của file đầu vào
-    - Mel-Spectrogram của file đầu vào
-    - Biểu đồ vector đặc trưng 47 chiều
-    - Biểu đồ Similarity Score của Top-5
-    Lưu tất cả vào thư mục ket_qua_trung_gian/
-    """
-    if not HAS_MATPLOTLIB:
-        print("  (Bỏ qua vẽ biểu đồ — cài matplotlib để kích hoạt: pip install matplotlib)")
-        return
-        
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    
-    y, sr = librosa.load(input_audio_path, sr=None)
-    
-    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    fig.suptitle(f'Ket qua trung gian - {os.path.basename(input_audio_path)}', fontsize=16, fontweight='bold')
-    
-    # ========== 1. Waveform ==========
-    ax1 = axes[0, 0]
-    librosa.display.waveshow(y, sr=sr, ax=ax1, color='#2196F3')
-    ax1.set_title('1. Waveform (Dang song thoi gian)', fontsize=12, fontweight='bold')
-    ax1.set_xlabel('Thoi gian (s)')
-    ax1.set_ylabel('Bien do')
-    ax1.grid(True, alpha=0.3)
-    
-    # ========== 2. Mel-Spectrogram ==========
-    ax2 = axes[0, 1]
-    S = librosa.feature.melspectrogram(y=y, sr=sr, n_fft=512, hop_length=160, n_mels=128)
-    S_dB = librosa.power_to_db(S, ref=np.max)
-    img = librosa.display.specshow(S_dB, sr=sr, hop_length=160, x_axis='time', y_axis='mel', ax=ax2, cmap='magma')
-    ax2.set_title('2. Mel-Spectrogram (Pho tan so)', fontsize=12, fontweight='bold')
-    fig.colorbar(img, ax=ax2, format='%+2.0f dB')
-    
-    # ========== 3. Feature Vector 47 chiều ==========
-    ax3 = axes[1, 0]
-    n_mfcc = N_MFCC
-    colors = (
-        ['#1976D2'] * n_mfcc +   # MFCC Mean
-        ['#7B1FA2'] * n_mfcc +   # MFCC Std
-        ['#5E35B1'] * n_mfcc +   # MFCC Autocorr
-        ['#E64A19'] * 5  +       # Spec Mean
-        ['#FF7043'] * 5  +       # Spec Std
-        ['#AB47BC'] * 5  +       # Spec Autocorr
-        ['#26A69A'] * 3  +       # Energy Bands
-        ['#FFA726'] * 3  +       # Tempo/Env/Silence
-        ['#00BCD4'] * 1  +       # Spectral Flatness
-        ['#009688'] * 1  +       # Spectral Contrast
-        ['#8BC34A'] * 2  +       # Num Peaks & Valleys
-        ['#FF5722'] * 1  +       # Pct Above Threshold
-        ['#F06292'] * 2          # Attack & Decay Time
-    )
-    x_pos = np.arange(len(input_features))
-    ax3.bar(x_pos, input_features, color=colors, width=0.8)
-    ax3.set_title(f'3. Feature Vector (88 chieu)', fontsize=12, fontweight='bold')
-    ax3.set_xlabel('Chi so dac trung')
-    ax3.set_ylabel('Gia tri')
-    ax3.set_xticks(x_pos[::5])
-    ax3.grid(True, alpha=0.3, axis='y')
-    from matplotlib.patches import Patch
-    legend_elements = [
-        Patch(facecolor='#1976D2', label=f'MFCC Mean ({N_MFCC})'),
-        Patch(facecolor='#7B1FA2', label=f'MFCC Std ({N_MFCC})'),
-        Patch(facecolor='#5E35B1', label=f'MFCC Autocorr ({N_MFCC})'),
-        Patch(facecolor='#E64A19', label='Spec Mean (5)'),
-        Patch(facecolor='#FF7043', label='Spec Std (5)'),
-        Patch(facecolor='#AB47BC', label='Spec Autocorr (5)'),
-        Patch(facecolor='#26A69A', label='Energy Bands (3)'),
-        Patch(facecolor='#FFA726', label='Tempo/Env/Silence (3)'),
-        Patch(facecolor='#00BCD4', label='Spectral Flatness (1)'),
-        Patch(facecolor='#009688', label='Spectral Contrast (1)'),
-        Patch(facecolor='#8BC34A', label='Num Peaks/Valleys (2)'),
-        Patch(facecolor='#FF5722', label='Pct Above Threshold (1)'),
-        Patch(facecolor='#F06292', label='Attack & Decay (2)'),
-    ]
-    ax3.legend(handles=legend_elements, loc='upper right', fontsize=6)
-    
-    # ========== 4. Similarity Scores Top-5 ==========
-    ax4 = axes[1, 1]
-    labels_top = [os.path.basename(r['file_path']) for r in top_results]
-    scores_top = [r['similarity'] for r in top_results]
-    bar_colors = ['#4CAF50' if s >= 0.8 else '#FFC107' if s >= 0.5 else '#F44336' for s in scores_top]
-    bars = ax4.barh(range(len(labels_top)), scores_top, color=bar_colors)
-    ax4.set_yticks(range(len(labels_top)))
-    ax4.set_yticklabels(labels_top, fontsize=8)
-    ax4.set_xlabel('Cosine Similarity')
-    ax4.set_title('4. Top-5 Ket qua tuong dong', fontsize=12, fontweight='bold')
-    ax4.set_xlim(0, 1.1)
-    ax4.invert_yaxis()
-    for i, (bar, score) in enumerate(zip(bars, scores_top)):
-        ax4.text(score + 0.01, i, f'{score:.4f}', va='center', fontsize=10, fontweight='bold')
-    ax4.grid(True, alpha=0.3, axis='x')
-    
-    plt.tight_layout()
-    output_path = os.path.join(OUTPUT_DIR, 'ket_qua_trung_gian.png')
-    plt.savefig(output_path, dpi=150, bbox_inches='tight')
-    plt.close()
-    
-    print(f"\n -> Đã lưu ảnh kết quả trung gian: {output_path}")
 
 def search_similar_sounds(input_audio_path, top_k=5):
     if not os.path.exists(input_audio_path):
@@ -276,12 +165,6 @@ def search_similar_sounds(input_audio_path, top_k=5):
         print(f"    Cosine Similarity: {res['similarity']:.4f}")
         print("  " + "-" * 40)
     
-    # Bước 6: Sinh kết quả trung gian (ảnh)
-    print(f"\n[Bước 6] Sinh kết quả trung gian (Waveform, Spectrogram, Feature Vector, Similarity Chart)...")
-    try:
-        generate_intermediate_results(input_audio_path, input_features, top_results)
-    except Exception as e:
-        print(f"  Cảnh báo: Không thể sinh ảnh kết quả trung gian: {e}")
     
     print("\n" + "=" * 60)
     print("HOÀN TẤT QUÁ TRÌNH TÌM KIẾM.")
