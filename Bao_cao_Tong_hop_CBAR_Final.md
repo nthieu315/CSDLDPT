@@ -60,7 +60,7 @@ Mô tả sự biến đổi theo chu kỳ dài.
 
 ### 3.2. Triển khai Thực nghiệm (Nguồn gốc Vector 88 chiều)
 
-Để đảm bảo tính bền vững, hệ thống trích xuất tổ hợp các chỉ số: **Trung bình (Mean)**, **Độ lệch chuẩn (Std)** và **Tự tương quan (Autocorr)** của các đặc trưng gốc.
+Để đảm quả tính bền vững, hệ thống trích xuất tổ hợp các chỉ số: **Trung bình (Mean)**, **Độ lệch chuẩn (Std)** và **Tự tương quan (Autocorr)** của các đặc trưng gốc.
 
 | STT | Nhóm triển khai | Số chiều | Cách cấu thành 88 chiều |
 |:---:|---|:---:|---|
