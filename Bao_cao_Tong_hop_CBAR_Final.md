@@ -17,91 +17,90 @@ Hệ thống Truy xuất Âm thanh dựa trên Nội dung (**Content-Based Audio
 
 ## 2. QUY TRÌNH TIỀN XỬ LÝ CHUYÊN SÂU (PREPROCESSING)
 
+Các bước tiền xử lý được thiết kế để định hình không gian đặc trưng chính xác nhất, loại bỏ nhiễu và tập trung vào bản chất cơ khí:
+
 ### 2.1. Cắt khoảng lặng (Silence Trimming)
-- **Công thức**: $y_{trimmed} = \{y[t] \mid |y[t]| > \epsilon\}$
-- **Ý nghĩa**: Loại bỏ các đoạn nhiễu hoặc khoảng lặng ở đầu/cuối file thu âm. Việc này đảm bảo các đặc trưng thống kê như trung bình năng lượng không bị kéo thấp bởi các đoạn không có tín hiệu. Hệ thống sử dụng ngưỡng `top_db=30`.
+- **Lý do sử dụng**: Âm thanh động cơ thường có đoạn "chờ" hoặc nhiễu nền ở đầu/cuối file. Việc cắt khoảng lặng đảm bảo các đặc trưng thống kê (như trung bình năng lượng) phản ánh đúng hoạt động của động cơ thay vì bị kéo thấp bởi các đoạn im lặng vô ích.
+- **Cơ chế**: Sử dụng ngưỡng `top_db=30` để xác định ranh giới tín hiệu.
 
 ### 2.2. Phân khung và Cửa sổ hóa (Framing & Windowing)
-- **Công thức**: $x_w[n] = x[n] \cdot w[n]$
-- **Lý thuyết**: Âm thanh là tín hiệu biến thiên. Để phân tích, ta chia tín hiệu thành các khung cực ngắn (20-30ms) để coi nó là dừng (stationary). 
-- **Thông số**: `N_FFT=512`, `Hop_Length=160`. Sử dụng hàm cửa sổ để tránh hiện tượng rò rỉ phổ (spectral leakage) khi thực hiện biến đổi Fourier.
+- **Lý do sử dụng**: Tín hiệu âm thanh là tín hiệu phi dừng. Việc chia nhỏ thành các khung cực ngắn (20-30ms) cho phép coi tín hiệu là dừng trong khoảng đó để áp dụng các phép biến đổi Fourier (FFT). Hàm cửa sổ giúp làm mịn biên khung hình, giảm thiểu sai số phổ.
+- **Thông số**: `N_FFT=512`, `Hop_Length=160`.
 
 ### 2.3. Lọc năng lượng khung (Frame Energy Masking)
-- **Cơ chế**: Chỉ các khung có năng lượng RMS > `0.005` mới được đưa vào tính toán đặc trưng.
-- **Ý nghĩa thực tế**: Loại bỏ các "khoảng nghỉ" cơ khí giữa các nhịp nổ động cơ hoặc tiếng gió nhiễu nhẹ, giúp vector đặc trưng phản ánh chính xác bản chất của tiếng máy.
+- **Lý do sử dụng**: Trong tiếng động cơ thực tế luôn có các khoảng nghỉ cơ khí siêu ngắn hoặc tiếng gió nhiễu cực thấp. Việc lọc bỏ các khung có năng lượng RMS < `0.005` giúp hệ thống chỉ tính toán trên các đoạn có "tiếng nổ" thực sự, làm tăng độ nhạy bén của vector đặc trưng.
 
 ---
 
-## 3. HỆ THỐNG ĐẶC TRƯNG VECTOR 88 CHIỀU (FEATURE ENGINEERING)
+## 3. PHÂN TÍCH ĐẶC TRƯNG ÂM THANH (FEATURE ANALYSIS)
 
-Hệ thống sử dụng vector **88 chiều** được chia thành 10 nhóm thuộc tính để đánh giá toàn diện tính chất âm thanh:
+Quá trình phân tích đặc trưng được thực hiện theo hai giai đoạn: Xác định các miền lý thuyết chính và chia nhỏ thành các nhóm thực nghiệm để gán trọng số.
 
-### BẢNG PHÂN LOẠI VÀ Ý NGHĨA VẬT LÝ
+### 3.1. Phân loại theo Miền Lý thuyết (3 Miền chính)
 
-| STT | Nhóm thuộc tính | Số chiều | Ý nghĩa vật lý và Rationale |
+Dựa trên lý thuyết xử lý tín hiệu số (DSP), các đặc trưng âm thanh được phân loại vào 3 miền nền tảng:
+
+#### A. Miền Thời gian (Time-domain Features)
+Phân tích trực tiếp trên biên độ sóng âm $x[t]$.
+- **RMS (Root Mean Square)**: Đo năng lượng. Công thức: $RMS = \sqrt{\frac{1}{N} \sum x[n]^2}$.
+- **ZCR (Zero Crossing Rate)**: Đo tốc độ đổi dấu tín hiệu. Công thức: $ZCR = \frac{1}{2(N-1)} \sum |\text{sgn}(x[n]) - \text{sgn}(x[n-1])|$.
+- **Waveform Shape**: Mô tả hình dạng đường bao và độ phức tạp (Peaks/Valleys).
+
+#### B. Miền Tần số (Frequency-domain Features)
+Chuyển đổi tín hiệu sang miền tần số bằng phép biến đổi Fourier nhanh (FFT).
+- **MFCCs**: Mô phỏng thính giác người, tách biệt đặc trưng của buồng đốt và thân máy.
+- **Spectral Centroid/Flatness**: Đo trọng tâm năng lượng (độ sáng) và tính hài âm của âm thanh.
+
+#### C. Miền Động lực học & Nhịp điệu (Temporal/Rhythmic)
+Mô tả sự biến đổi theo chu kỳ dài.
+- **Tempo**: Nhịp điệu vòng tua máy (RPM).
+- **ADSR Envelope**: Attack/Decay Time phản ánh quy luật đánh lửa và xả thải cơ khí.
+
+---
+
+### 3.2. Triển khai Thực nghiệm (Nguồn gốc Vector 88 chiều)
+
+Để đảm bảo tính bền vững, hệ thống trích xuất tổ hợp các chỉ số: **Trung bình (Mean)**, **Độ lệch chuẩn (Std)** và **Tự tương quan (Autocorr)** của các đặc trưng gốc.
+
+| STT | Nhóm triển khai | Số chiều | Cách cấu thành 88 chiều |
 |:---:|---|:---:|---|
-| **1** | **Tần số (Frequency)** | 3 | ZCR (Tốc độ đổi dấu). Phân biệt tiếng rít cao (máy cưa) và tiếng trầm (xe tải). |
-| **2** | **Biên độ (Amplitude)** | 3 | RMS (Năng lượng). Phản ánh cường độ hoạt động của động cơ. |
-| **3** | **Thời gian (Time)** | 2 | Tempo (Nhịp điệu BPM) và Silence Ratio. Bắt nhịp nổ tuần hoàn của máy. |
-| **4** | **Phổ âm (Spectrum)** | 67 | 60 chiều MFCCs. Đây là "vân tay âm thanh", mô tả cộng hưởng trong buồng đốt. |
-| **5** | **Hình dạng (Waveform)** | 2 | Envelope Std. Đo mức độ biến động của đường bao biên độ. |
-| **6** | **Độ phức tạp** | 2 | Số lượng Đỉnh/Thung lũng. Phân biệt âm thanh "mịn" hay "gai góc". |
-| **7** | **Biên độ màu (Timbre)**| 3 | Năng lượng dải Low/Mid/High. Xác định cân bằng âm sắc (Bassy vs Trebly). |
-| **8** | **Độ chói (Brightness)**| 4 | Spectral Centroid. Phân biệt động cơ tua máy cao (Sáng) vs máy Diesel (Trầm). |
-| **9** | **Độ chạy (Attack)** | 1 | Attack Time. Tiếng nổ piston (nhanh) vs Tiếng gió phản lực (chậm). |
-| **10** | **Độ suy giảm (Decay)**| 1 | Decay Time. Thời gian âm thanh tan biến sau mỗi chu kỳ nổ. |
+| **1** | **Tần số (ZCR)** | 3 | Mean, Std, Autocorr (1x3) |
+| **2** | **Biên độ (RMS)** | 3 | Mean, Std, Autocorr (1x3) |
+| **3** | **Thời gian (Tempo)** | 2 | Tempo (1), Silence Ratio (1) |
+| **4** | **Phổ âm (MFCC)** | 67 | **MFCC (60)**: 20 hệ số x 3 chỉ số (M,S,A); **Bandwidth (3)**: M,S,A; **Rolloff (3)**: M,S,A; **Contrast (1)**: Mean |
+| **5** | **Hình dạng** | 2 | Envelope Std (1), Pct Above Threshold (1) |
+| **6** | **Độ phức tạp** | 2 | Num Peaks (1), Num Valleys (1) |
+| **7** | **Biên độ màu** | 3 | Energy Bands (Low, Mid, High) |
+| **8** | **Độ chói (Centroid)** | 4 | **Centroid (3)**: M,S,A; **Flatness (1)**: Mean |
+| **9** | **Độ chạy (Attack)** | 1 | Attack Time (1) |
+| **10**| **Độ suy giảm (Decay)** | 1 | Decay Time (1) |
+| | **TỔNG CỘNG** | **88** | |
 
 ---
 
 ## 4. THUẬT TOÁN TÌM KIẾM VÀ TÍNH TƯƠNG ĐỒNG (SEARCH ENGINE)
 
 ### 4.1. Chuẩn hóa StandardScaler (Z-score)
-- **Công thức**: $z = (x - \mu) / \sigma$
-- **Lý thuyết**: Đưa tất cả các chiều đặc trưng (dù là Hz, BPM hay biên độ) về cùng một mặt bằng thống kê. Nếu không có bước này, các đặc trưng có giá trị lớn sẽ làm lu mờ các đặc trưng nhỏ nhưng quan trọng.
+Đưa tất cả các chiều đặc trưng về cùng một mặt bằng thống kê để tránh việc các đặc trưng có thang đo lớn áp đảo các đặc trưng nhỏ.
 
 ### 4.2. Group-wise Weighted Cosine Similarity
-Đây là thuật toán cốt lõi của hệ thống, cho phép so khớp dựa trên từng nhóm thuộc tính thay vì tính gộp toàn bộ vector:
+Thuật toán tính độ tương đồng theo từng nhóm thuộc tính và tổng hợp có trọng số:
 $$Sim_{final} = \sum_{i=1}^{10} (w_i \times \text{CosineSim}(Group_i))$$
 
-**Bảng phân bổ trọng số tối ưu:**
-- **Nhóm 4 - Phổ âm (40%)**: Đặc trưng quan trọng nhất để nhận diện danh tính nguồn âm.
-- **Nhóm 8 - Độ chói (15%)**: Chìa khóa để phân biệt trực thăng vs máy bay phản lực.
-- **Nhóm 9 & 10 - ADSR (15%)**: Bắt được chu kỳ cơ khí của piston.
-- **Nhóm 7 - Timbre (10%)**: Phân loại theo dải tần năng lượng.
-- **Các nhóm khác (20%)**: Đảm bảo tính bền vững trước nhiễu môi trường.
+**Bảng trọng số tối ưu:** Phổ âm (40%), Độ chói (15%), ADSR (15%), Biên độ màu (10%), Khác (20%).
 
 ---
 
 ## 5. ĐÁNH GIÁ HIỆU SUẤT THỰC NGHIỆM (EVALUATION)
 
-Trên tập dữ liệu thực tế **1,974 mẫu**, hệ thống đạt được các chỉ số:
+Trên tập dữ liệu thực tế **1,974 mẫu**, hệ thống đạt được:
+- **Accuracy (Top-1)**: **91.79%**
+- **mAP**: **0.6095**
+- **Precision@5**: **88.27%**
 
-| Chỉ số | Kết quả | Ý nghĩa |
-|---|---|---|
-| **Accuracy (Precision@1)** | **91.79%** | Tỉ lệ file đứng đầu kết quả tìm kiếm là đúng nhãn. |
-| **mAP (Mean Average Precision)**| **0.6095** | Khả năng xếp hạng các kết quả liên quan ở vị trí cao. |
-| **Precision@5** | **88.27%** | Độ chính xác trong 5 kết quả trả về đầu tiên. |
-
-### Phân tích Ma trận nhầm lẫn:
-- **Ưu điểm**: Chainsaw (0.96) và Airplane (0.95) đạt độ chính xác cực cao do đặc trưng rất tách biệt.
-- **Thách thức**: Nhầm lẫn giữa Airplane và Supercars (22 trường hợp) do âm rít ở vòng tua cao có phổ âm tương đồng.
-- **Cars**: Hoạt động ổn định (90% precision), ít bị nhầm lẫn nhờ dải tần trung tính.
+**Phân tích nhầm lẫn**: Nhầm lẫn chủ yếu giữa Airplane và Supercars (22 trường hợp) do âm rít ở vòng tua cao có phổ âm tương đồng.
 
 ---
 
-## 6. CẤU TRÚC HỆ THỐNG VÀ MÃ NGUỒN (SOURCE CODE)
-
-- `feature_extractor.py`: Trích xuất vector 88 chiều chia theo 10 nhóm.
-- `database.py`: Quản lý CSDL SQLite (`engine_sounds.db`).
-- `search_engine.py`: Thực hiện Load CSDL, Chuẩn hóa và tính toán tương đồng trọng số.
-- `evaluate_performance.py`: Script tự động đánh giá các chỉ số Precision, Recall và mAP.
-
----
-
-## 7. KẾT LUẬN VÀ HƯỚNG PHÁT TRIỂN
-Hệ thống CBAR 88 chiều cung cấp một giải pháp mạnh mẽ và có khả năng giải thích cao cho việc tìm kiếm âm thanh động cơ. 
-
-**Hướng phát triển đề xuất:**
-1.  **Relevance Feedback**: Cho phép người dùng điều chỉnh trọng số Tempo và Attack để tách biệt nhịp nổ piston.
-2.  **K-means Clustering**: Phân mảnh các nhãn lớn thành các trạng thái (cất cánh, tăng tốc) để tăng độ mịn của tìm kiếm.
-3.  **Indexing**: Sử dụng cấu trúc cây cho các bộ dữ liệu lớn hơn 100,000 mẫu.
+## 6. KẾT LUẬN VÀ HƯỚNG PHÁT TRIỂN
+Hệ thống chứng minh tính hiệu quả vượt trội trong việc phân tích âm thanh cơ khí. Các hướng phát triển tiếp theo bao gồm áp dụng **K-means Clustering** để phân mảnh trạng thái và **Relevance Feedback** để điều chỉnh trọng số theo ý muốn người dùng.
